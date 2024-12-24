@@ -1,0 +1,95 @@
+---
+title: "Volcano Plot and Heatmap for DE Analysis"
+author: "elif"
+date: "2024-02-07"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##Loading libraries
+```{r}
+library(ggplot2)
+library(pheatmap)
+library(dplyr)
+library(RColorBrewer)
+
+```
+
+##Setting Working Directory and Reading Data
+```{r}
+setwd("C:/Users/elif karahaner/Desktop/rnaseq/Visualization/")
+Detable <- read.csv("De_Ctrl_WT_filtered.tsv", 
+                    header = TRUE, 
+                    stringsAsFactors = FALSE, 
+                    sep = "\t")
+
+```
+
+##Volcano Plot
+```{r}
+# Add Group column to classify upregulated and downregulated genes
+Detable$Group <- NA
+Detable$Group[which(Detable$logFC >= 0.6)] <- "UP"
+Detable$Group[which(Detable$logFC <= -0.6)] <- "DOWN"
+
+# Separate upregulated and downregulated genes
+WT_up <- Detable %>% filter(Detable$Group == "UP")
+WT_down <- Detable %>% filter(Detable$Group == "DOWN")
+
+# Add Regulation labels
+WT_up$Regulation <- "Upregulated"
+WT_down$Regulation <- "Downregulated"
+
+# Combine upregulated and downregulated genes into one data frame
+all_genes <- rbind(WT_up, WT_down)
+
+# Create volcano plot
+ggplot(all_genes, aes(x = logFC, y = -log10(PValue))) +
+  geom_point(aes(color = Group), alpha = 0.7, size = 2.5, shape = 16) +
+  geom_text(aes(label = gene_name), hjust = -0.2, vjust = 0.5, size = 2.5, check_overlap = TRUE) +  
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "gray") +
+  geom_vline(xintercept = c(-0.6, 0.6), linetype = "dashed", color = "gray") +
+  scale_color_manual(values = c("red", "blue"), labels = c("Downregulated", "Upregulated")) +
+  labs(title = "Volcano Plot with Gene Names",
+       x = "Log2 Fold Change",
+       y = "-log10(p-value)",
+       color = "Regulation") +
+  theme_minimal(base_size = 14)
+
+```
+
+##Heatmap Visualization
+```{r}
+# Read the data for heatmap
+my_data <- read.csv("De_Ctrl_WT_filtered.tsv",
+                    stringsAsFactors = FALSE,
+                    header = TRUE,
+                    sep = "\t")
+
+# Create heatmap with Z-score normalization (genes clustered)
+pheatmap(log2(my_data[, c(12:ncol(my_data))] + 1), 
+         show_rownames = FALSE, 
+         cluster_cols = FALSE, 
+         cluster_rows = TRUE, 
+         scale = "row",
+         show_colnames = TRUE, 
+         border_color = FALSE, 
+         legend = TRUE, 
+         color = rev(colorRampPalette(brewer.pal(8, name = "RdBu"))(256)))
+
+# Heatmap with clustered genes and samples
+pheatmap(log2(my_data[, c(12:ncol(my_data))] + 1), 
+         show_rownames = FALSE, 
+         cluster_cols = TRUE, 
+         cluster_rows = TRUE, 
+         scale = "row",
+         show_colnames = TRUE, 
+         border_color = FALSE, 
+         legend = TRUE, 
+         color = rev(colorRampPalette(brewer.pal(8, name = "RdBu"))(256)))
+
+```
+
