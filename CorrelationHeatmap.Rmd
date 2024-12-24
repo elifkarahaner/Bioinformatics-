@@ -1,0 +1,47 @@
+---
+title: "Correlation Heatmap"
+author: "elif"
+date: "2024-02-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##Loading libraries
+```{r}
+library(dplyr)
+library(ggplot2)
+library(RColorBrewer)
+library(pheatmap)
+```
+
+##Correlation Heatmap
+```{r}
+# Set working directory
+setwd("C:/Users/elif karahaner/Desktop/rnaseq/annotate/")
+
+# Read filtered FPKM data
+fpkms_filtered <- read.csv("fpkms_filtered.tsv", 
+                           header = TRUE, 
+                           stringsAsFactors = FALSE, 
+                           sep = "\t")
+
+# Calculate correlation (Spearman)
+corr <- cor(fpkms_filtered[, 8:ncol(fpkms_filtered)], method = "spearman")
+
+```
+
+##Visualization
+```{r}
+# Define color palette for heatmap
+col <- colorRampPalette(rev(c("#08306b", "#2171b5", "#2b8cbe", "#4eb3d3")))(250)
+
+# Create heatmap
+p <- pheatmap(log2(corr + 1), 
+              color = col, 
+              cluster_rows = TRUE, 
+              cluster_cols = TRUE)
+```
+
