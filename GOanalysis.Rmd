@@ -1,0 +1,83 @@
+---
+title: "GO Analysis"
+author: "elif"
+date: "2024-02-08"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##Loading Libraries
+```{r}
+library(clusterProfiler)
+library(GOSemSim)
+library(DOSE)
+library(org.Hs.eg.db)
+library(enrichplot) 
+```
+
+## Loading Example Data for geneList
+```{r}
+data(geneList)
+gene <- names(geneList)[abs(geneList) > 2]
+```
+
+##Setting Directory and Reading Input Gene Data
+```{r}
+setwd("C:/Users/elif karahaner/Desktop/rnaseq/Visualization/")
+gene.df <- read.csv("De_Ctrl_WT_filtered.tsv", header = TRUE, stringsAsFactors = FALSE, sep = "\t")
+```
+
+##Performing GO Analysis 
+```{r}
+ego2 <- enrichGO(
+  gene         = gene.df$gene_name,  # Input gene names
+  OrgDb        = org.Hs.eg.db,       # Use human database
+  keyType      = 'SYMBOL',           # Specify gene ID type
+  ont          = "BP",               # Analyze Biological Process
+  pAdjustMethod = "BH",              # Adjust p-values with Benjamini-Hochberg method
+  pvalueCutoff  = 0.05,              # P-value cutoff
+  qvalueCutoff  = 0.05,              # Q-value cutoff
+  readable      = TRUE               # Convert gene IDs to human-readable symbols
+)
+
+```
+
+##Visualization of Results
+```{r}
+## Barplot visualization
+barplot(ego2, showCategory = 10)
+
+## Dotplot visualization
+dotplot(ego2)
+
+# Prepare for emapplot visualization
+d <- godata('org.Hs.eg.db', ont = "BP")  # Semantic similarity data
+ego <- pairwise_termsim(ego2, method = "Wang", semData = d)
+
+## Emapplot visualization
+emapplot(ego)
+
+## Clustered emapplot visualization
+emapplot_cluster(ego)
+
+# Prepare for treeplot visualization
+edox2 <- pairwise_termsim(ego2)
+
+## Treeplot visualization
+p1 <- treeplot(edox2)  # Assign to a variable
+p1  # Display the treeplot
+
+```
+
+##Exporting results
+```{r}
+Cluster1_GO_BP <- setReadable(ego2, OrgDb = org.Hs.eg.db)
+write.csv(
+  Cluster1_GO_BP,
+  file = "C:/Users/elif karahaner/Desktop/rnaseq/GO/BP_DESEQ_result.csv"
+)
+```
+
