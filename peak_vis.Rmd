@@ -1,0 +1,461 @@
+---
+title: "Peak Visualization"
+author: "elif"
+date: "2024-07-24"
+output: 
+  html_document: 
+    theme: cerulean
+    toc: true
+params:
+  code_folding: show  # Default setting; user can change this to false to hide code
+---
+```{r setup, include=FALSE, code_folding=show}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE,code_folding = "show" ,collapse = TRUE)
+
+```
+
+# Top Peak Visualization
+
+## Table of Contents
+{:.no_toc}
+* [Loading required packages](#loading-required-packages)
+
+* [Reading Bam files of each sample and converting them to coverage](#reading-bam-files-of-each-sample-and-converting-them-to-coverage)
+
+* [Selecting samples from each group](#selecting-samples-from-each-group)
+
+* [Top peak of Treatment and Control group comparison](#top-peak-of-treatment-and-control-group-comparison)
+
+* [Top peak of Reverse and Control group comparison](#top-peak-of-reverse-and-control-group-comparison)
+
+* [Top peak of Treatment and Reverse group comparison](#top-peak-of-treatment-and-reverse-group-comparison)
+
+* [Annotation for top peaks](#annotation-for-top-peaks)
+
+* [View Annotation Results](#view-annotation-results)
+
+* [Comparison of Treatment and Reverse Group In Same Plot](#comparison-of-treatment-and-reverse-group-in-same-plot)
+
+* [Comparison of Treatment and Control Group In Same Plot](#comparison-of-treatment-and-control-group-in-same-plot)
+
+* [Comparison of Control and Reverse Group In Same Plot](#comparison-of-control-and-reverse-group-in-same-plot)
+
+## Loading required packages
+```{r}
+library(Rsamtools)
+library(GenomicAlignments)
+library(GenomicRanges)
+library(DiffBind)
+library(DESeq2)
+library(readr)
+library(tsTools)
+require(TxDb.Mmusculus.UCSC.mm39.refGene)
+library(RColorBrewer)
+library(GEOquery)
+library(rtracklayer)
+library(IRanges)
+library(ggplot2)
+library(ChIPseeker)
+library(org.Mm.eg.db)
+```
+
+
+```{r}
+# Define directories for BAM files
+bam_dirs <- c("data/hdf_hdf", "data/hdf_cd", "data/cd_cd")
+
+# Function to read BAM files and compute coverage
+compute_coverage <- function(bam_dir) {
+  bam_files <- list.files(bam_dir, pattern = "\\_sp.bam$", full.names = TRUE)
+  coverage_list <- lapply(bam_files, function(bam_file) {
+    reads <- readGAlignments(bam_file)
+    read_count <- length(reads)
+    coverage <- coverage(granges(reads))
+    return(coverage)
+  })
+ 
+  
+# Normalize each sample's coverage by its own minimum read count, handling the case when min read count is 0
+  normalized_coverage_list <- lapply(coverage_list, function(cov) {
+    min_read_count <- min(cov)
+    if (min_read_count == 0) {
+      return(cov)  # Return the original coverage if min read count is 0
+    } else {
+      return(cov / min_read_count)
+    }
+  })
+  
+  names(normalized_coverage_list) <- basename(bam_files)  # Set names for each coverage object same with sample name
+  return(normalized_coverage_list)
+}
+
+
+# Compute coverage for each group
+coverage_list_hdf_hdf <- compute_coverage(bam_dirs[1])
+coverage_list_hdf_cd <- compute_coverage(bam_dirs[2])
+coverage_list_cd_cd <- compute_coverage(bam_dirs[3])
+
+
+
+create_simple_rle_list <- function(coverage_list) {
+  cov <- SimpleList() #when i try as SimpleRleList() it gave error function cannot found
+  for (sample_name in names(coverage_list)) {
+    cov[[sample_name]] <- coverage_list[[sample_name]]
+  }
+  return(cov)
+}
+
+cov_hdf_hdf <- create_simple_rle_list(coverage_list_hdf_hdf)
+cov_hdf_cd <- create_simple_rle_list(coverage_list_hdf_cd)
+cov_cd_cd <- create_simple_rle_list(coverage_list_cd_cd)
+
+```
+
+
+
+
+## Reading Bam files of each sample and converting them to coverage
+```{r}
+
+# Define directories for BAM files
+bam_dirs <- c("data/hdf_hdf", "data/hdf_cd", "data/cd_cd")
+
+# Function to read BAM files and compute coverage
+compute_coverage <- function(bam_dir) {
+  bam_files <- list.files(bam_dir, pattern = "\\_sp.bam$", full.names = TRUE)
+  coverage_list <- lapply(bam_files, function(bam_file) {
+    reads <- readGAlignments(bam_file)
+    coverage <- coverage(granges(reads))
+    return(coverage)
+  })
+  names(coverage_list) <- basename(bam_files)  # Set names for each coverage object same with sample name
+  return(coverage_list)
+}
+
+# Compute coverage for each group
+coverage_list_hdf_hdf <- compute_coverage(bam_dirs[1])
+coverage_list_hdf_cd <- compute_coverage(bam_dirs[2])
+coverage_list_cd_cd <- compute_coverage(bam_dirs[3])
+
+
+
+create_simple_rle_list <- function(coverage_list) {
+  cov <- SimpleList() #when i try as SimpleRleList() it gave error function cannot found
+  for (sample_name in names(coverage_list)) {
+    cov[[sample_name]] <- coverage_list[[sample_name]]
+  }
+  return(cov)
+}
+
+cov_hdf_hdf <- create_simple_rle_list(coverage_list_hdf_hdf)
+cov_hdf_cd <- create_simple_rle_list(coverage_list_hdf_cd)
+cov_cd_cd <- create_simple_rle_list(coverage_list_cd_cd)
+
+
+```
+
+## Selecting samples from each group
+```{r}
+# Define the samples you want to visualize for each group
+selected_samples_hdf_hdf <- c("L132725_sp.bam", "L132727_sp.bam","L132729_sp.bam","L132731_sp.bam") 
+selected_samples_hdf_cd <- c("L132733_sp.bam", "L132735_sp.bam","L132737_sp.bam","L132739_sp.bam")   
+selected_samples_cd_cd <- c("L132741_sp.bam", "L132743_sp.bam","L132745_sp.bam","L132747_sp.bam")    
+
+# Function to create a profile list for selected samples
+create_profile_list <- function(cov, sample_names) {
+  profs <- cov[sample_names]
+  return(profs)
+}
+
+# Create profile lists for selected samples
+profs_hdf_hdf <- create_profile_list(cov_hdf_hdf, selected_samples_hdf_hdf)
+profs_hdf_cd <- create_profile_list(cov_hdf_cd, selected_samples_hdf_cd)
+profs_cd_cd <- create_profile_list(cov_cd_cd, selected_samples_cd_cd)
+
+
+
+```
+
+## Top peak of Treatment and Control group comparison
+```{r}
+#Determining profs, samples that are visualized, outside the plotting code is preferred.
+profs1 = list("sample1" = profs_hdf_hdf[[selected_samples_hdf_hdf[1]]],
+                         "sample2" = profs_hdf_hdf[[selected_samples_hdf_hdf[2]]],
+                         "sample3" = profs_hdf_hdf[[selected_samples_hdf_hdf[3]]],
+                         "sample4" = profs_hdf_hdf[[selected_samples_hdf_hdf[4]]]
+             )
+#To match chr parameter with coverages, two of them will be ensembl type
+seqlevelsStyle(TxDb.Mmusculus.UCSC.mm39.refGene) <- "ensembl"
+
+#To indicate actual place of top peak
+ann <- list(
+  "sample4" = data.frame(chr = "6", start = 5510146, end = 5510546, col=c("blue")))
+
+# Plot profiles for a specific region and chromosome
+#for fstart and fend i substract/add 2kb to actual top peak range
+plot1<-plotProfiles(fstart = 5508146, fend = 5517546, fchr = "6",
+             profs = profs1, ylims=list(c(0,200),c(0,200),c(0,200),c(0,200)),
+             cols = brewer.pal(length(selected_samples_hdf_hdf), "Set1"),
+             txdb = TxDb.Mmusculus.UCSC.mm39.refGene,
+             ann=ann)
+            
+            
+```
+
+```{r}
+
+#To indicate actual place of top peak
+ann <- list(
+  "sample4" = data.frame(chr = "6", start = 5510146, end = 5510546, col=c("blue")))
+
+profs2 = list("sample1" = profs_cd_cd[[selected_samples_cd_cd[1]]],
+                         "sample2" = profs_cd_cd[[selected_samples_cd_cd[2]]],
+                         "sample3" = profs_cd_cd[[selected_samples_cd_cd[3]]],
+                         "sample4" = profs_cd_cd[[selected_samples_cd_cd[4]]]
+             )
+
+# Plot profiles for a specific region and chromosome
+#for fstart and fend i substract/add 2kb to actual top peak range
+plot2<-plotProfiles(fstart = 5508146, fend = 5517546, fchr = "6",
+             profs = profs2,ylims=list(c(0,200),c(0,200),c(0,200),c(0,200)),
+             cols = brewer.pal(length(selected_samples_cd_cd), "Set1"),
+             txdb = TxDb.Mmusculus.UCSC.mm39.refGene,
+             ann=ann)
+```
+
+
+## Top peak of Reverse and Control group comparison
+```{r}
+#To indicate actual place of top peak
+ann <- list(
+  "sample4" = data.frame(chr = "15", start = 76330515, end = 76330915, col=c("blue")))
+profs2 = list("sample1" = profs_cd_cd[[selected_samples_cd_cd[1]]],
+                         "sample2" = profs_cd_cd[[selected_samples_cd_cd[2]]],
+                         "sample3" = profs_cd_cd[[selected_samples_cd_cd[3]]],
+                         "sample4" = profs_cd_cd[[selected_samples_cd_cd[4]]]
+             )
+
+# Plot profiles for a specific region and chromosome
+#for fstart and fend i substract/add 2kb to actual top peak range
+plot3<-plotProfiles(fstart = 76328515, fend = 76332915, fchr = "15",
+             profs = profs2,ylims=list(c(0,200),c(0,200),c(0,200),c(0,200)),
+             cols = brewer.pal(length(selected_samples_cd_cd), "Set1"),
+             txdb = TxDb.Mmusculus.UCSC.mm39.refGene,
+             ann=ann)
+
+
+```
+
+```{r}
+#To indicate actual place of top peak
+ann <- list(
+  "sample4" = data.frame(chr = "15", start = 76330515, end = 76330915, col=c("blue")))
+profs3 = list("sample1" = profs_hdf_cd[[selected_samples_hdf_cd[1]]],
+                         "sample2" = profs_hdf_cd[[selected_samples_hdf_cd[2]]],
+                         "sample3" = profs_hdf_cd[[selected_samples_hdf_cd[3]]],
+                         "sample4" = profs_hdf_cd[[selected_samples_hdf_cd[4]]]
+             )
+
+# Plot profiles for a specific region and chromosome
+#for fstart and fend i substract/add 2kb to actual top peak range
+plot4<-plotProfiles(fstart = 76328515, fend = 76332915, fchr = "15",
+             profs = profs3,ylims=list(c(0,200),c(0,200),c(0,200),c(0,200)),
+             cols = brewer.pal(length(selected_samples_hdf_cd), "Set1"),
+             txdb = TxDb.Mmusculus.UCSC.mm39.refGene,
+             ann=ann)
+```
+
+
+## Top peak of Treatment and Reverse group comparison
+
+```{r}
+#To indicate actual place of top peak
+ann <- list(
+  "sample4" = data.frame(chr = "13", start = 22219161, end = 22219561, col=c("blue")))
+
+profs1 = list("sample1" = profs_hdf_hdf[[selected_samples_hdf_hdf[1]]],
+                         "sample2" = profs_hdf_hdf[[selected_samples_hdf_hdf[2]]],
+                         "sample3" = profs_hdf_hdf[[selected_samples_hdf_hdf[3]]],
+                         "sample4" = profs_hdf_hdf[[selected_samples_hdf_hdf[4]]]
+             )
+
+# Plot profiles for a specific region and chromosome
+#for fstart and fend i substract/add 2kb to actual top peak range
+plot5<-plotProfiles(fstart = 22217161, fend = 22221561, fchr = "13",
+             profs = profs1,ylims=list(c(0,200),c(0,200),c(0,200),c(0,200)),
+             cols = brewer.pal(length(selected_samples_hdf_hdf), "Set1"),
+             txdb = TxDb.Mmusculus.UCSC.mm39.refGene,
+             ann=ann)
+
+
+
+```
+
+```{r}
+ann <- list(
+  "sample4" = data.frame(chr = "13", start = 22219161, end = 22219561, col=c("blue")))
+
+profs3= list("sample1" = profs_hdf_cd[[selected_samples_hdf_cd[1]]],
+                         "sample2" = profs_hdf_cd[[selected_samples_hdf_cd[2]]],
+                         "sample3" = profs_hdf_cd[[selected_samples_hdf_cd[3]]],
+                         "sample4" = profs_hdf_cd[[selected_samples_hdf_cd[4]]]
+             )
+
+# Plot profiles for a specific region and chromosome
+#for fstart and fend i substract/add 2kb to actual top peak range
+plot6<-plotProfiles(fstart = 22217161, fend = 22221561, fchr = "13",
+             profs = profs3,ylims=list(c(0,200),c(0,200),c(0,200),c(0,200)),
+             cols = brewer.pal(length(selected_samples_hdf_cd), "Set1"),
+             txdb = TxDb.Mmusculus.UCSC.mm39.refGene,
+             ann=ann)
+```
+
+## Annotation for top peaks
+
+```{r}
+# Example data for top peaks
+top_peak1 <- data.frame(
+    seqnames = "6",
+    start = 5508146,
+    end = 5517546
+)
+top_peak2 <- data.frame(
+    seqnames = "15",
+    start = 76328515,
+    end = 76332915
+)
+top_peak3 <- data.frame(
+    seqnames = "13",
+    start = 22219161,
+    end = 22219561
+)
+
+# Create GRanges objects
+gr_peak1 <- GRanges(seqnames=top_peak1$seqnames, ranges=IRanges(start=top_peak1$start, end=top_peak1$end))
+gr_peak2 <- GRanges(seqnames=top_peak2$seqnames, ranges=IRanges(start=top_peak2$start, end=top_peak2$end))
+gr_peak3 <- GRanges(seqnames=top_peak3$seqnames, ranges=IRanges(start=top_peak3$start, end=top_peak3$end))
+
+txdb <- TxDb.Mmusculus.UCSC.mm39.refGene  
+
+# Annotate peaks
+peakAnno1 <- annotatePeak(gr_peak1, tssRegion=c(-3000, 3000), TxDb=txdb, annoDb="org.Mm.eg.db")
+peakAnno2 <- annotatePeak(gr_peak2, tssRegion=c(-3000, 3000), TxDb=txdb, annoDb="org.Mm.eg.db")
+peakAnno3 <- annotatePeak(gr_peak3, tssRegion=c(-3000, 3000), TxDb=txdb, annoDb="org.Mm.eg.db")
+
+
+```
+
+## View Annotation Results
+
+```{r}
+# Convert to data frames
+df_peakAnno1 <- as.data.frame(peakAnno1)
+df_peakAnno2 <- as.data.frame(peakAnno2)
+df_peakAnno3 <- as.data.frame(peakAnno3)
+
+# View annotation results
+head(df_peakAnno1)
+head(df_peakAnno2)
+head(df_peakAnno3)
+```
+
+
+## Comparison of Treatment and Reverse Group In Same Plot
+
+```{r}
+
+#To match chr parameter with coverages, two of them will be ensembl type
+seqlevelsStyle(TxDb.Mmusculus.UCSC.mm39.refGene) <- "ensembl"
+
+ann <- list(
+  "sample4" = data.frame(chr = "13", start = 22219161, end = 22219561, col=c("green")))
+
+profs3_1= list("sample1_reverse" = profs_hdf_cd[[selected_samples_hdf_cd[1]]],
+                         "sample2" = profs_hdf_cd[[selected_samples_hdf_cd[2]]],
+                         "sample3" = profs_hdf_cd[[selected_samples_hdf_cd[3]]],
+                         "sample4" = profs_hdf_cd[[selected_samples_hdf_cd[4]]],
+                         "sample1_treatment" = profs_hdf_hdf[[selected_samples_hdf_hdf[1]]],
+                         "sample2" = profs_hdf_hdf[[selected_samples_hdf_hdf[2]]],
+                         "sample3" = profs_hdf_hdf[[selected_samples_hdf_hdf[3]]],
+                         "sample4" = profs_hdf_hdf[[selected_samples_hdf_hdf[4]]]
+             )
+
+# Generate two colors from the Set1 palette
+colors <- brewer.pal(2, "Set1")
+
+# Create a vector of colors: first four samples one color, next four samples another color
+profs_colors <- c(rep(colors[1], 4), rep(colors[2], 4))
+
+plot7<-plotProfiles(fstart = 22217161, fend = 22221561, fchr = "13",
+             profs = profs3_1, ylims=list(c(0,200),c(0,200),c(0,200),c(0,200),c(0,200),c(0,200),c(0,200),c(0,200)),
+             cols = profs_colors,  # Use the custom colors for each sample
+             txdb = TxDb.Mmusculus.UCSC.mm39.refGene,
+             ann=ann)
+```
+
+## Comparison of Treatment and Control Group In Same Plot
+
+```{r}
+#Determining profs, samples that are visualized, outside the plotting code is preferred.
+profs1_2 = list("sample1_treatment" = profs_hdf_hdf[[selected_samples_hdf_hdf[1]]],
+                         "sample2" = profs_hdf_hdf[[selected_samples_hdf_hdf[2]]],
+                         "sample3" = profs_hdf_hdf[[selected_samples_hdf_hdf[3]]],
+                         "sample4" = profs_hdf_hdf[[selected_samples_hdf_hdf[4]]],
+                         "sample1_control" = profs_cd_cd[[selected_samples_cd_cd[1]]],
+                         "sample2" = profs_cd_cd[[selected_samples_cd_cd[2]]],
+                         "sample3" = profs_cd_cd[[selected_samples_cd_cd[3]]],
+                         "sample4" = profs_cd_cd[[selected_samples_cd_cd[4]]]
+             )
+
+# Generate two colors from the Set1 palette
+colors <- brewer.pal(2, "Set1")
+
+# Create a vector of colors: first four samples one color, next four samples another color
+profs_colors <- c(rep(colors[1], 4), rep(colors[2], 4))
+
+#To indicate actual place of top peak
+ann <- list(
+  "sample4" = data.frame(chr = "6", start = 5510146, end = 5510546, col=c("green")))
+
+# Plot profiles for a specific region and chromosome
+#for fstart and fend i substract/add 2kb to actual top peak range
+plot1<-plotProfiles(fstart = 5508146, fend = 5517546, fchr = "6",
+             profs = profs1_2, ylims=list(c(0,200),c(0,200),c(0,200),c(0,200),c(0,200),c(0,200),c(0,200),c(0,200)),
+             cols = profs_colors,
+             txdb = TxDb.Mmusculus.UCSC.mm39.refGene,
+             ann=ann)
+```
+
+
+## Comparison of Control and Reverse Group In Same Plot
+
+```{r}
+# Generate two colors from the Set1 palette
+colors <- brewer.pal(2, "Set1")
+
+# Create a vector of colors: first four samples one color, next four samples another color
+profs_colors <- c(rep(colors[1], 4), rep(colors[2], 4))
+
+#To indicate actual place of top peak
+ann <- list(
+  "sample4" = data.frame(chr = "15", start = 76330515, end = 76330915, col=c("green")))
+
+profs2_3 = list("sample1_control" = profs_cd_cd[[selected_samples_cd_cd[1]]],
+                         "sample2" = profs_cd_cd[[selected_samples_cd_cd[2]]],
+                         "sample3" = profs_cd_cd[[selected_samples_cd_cd[3]]],
+                         "sample4" = profs_cd_cd[[selected_samples_cd_cd[4]]],
+                         "sample1_reverse" = profs_hdf_cd[[selected_samples_hdf_cd[1]]],
+                         "sample2" = profs_hdf_cd[[selected_samples_hdf_cd[2]]],
+                         "sample3" = profs_hdf_cd[[selected_samples_hdf_cd[3]]],
+                         "sample4" = profs_hdf_cd[[selected_samples_hdf_cd[4]]]
+             )
+
+# Plot profiles for a specific region and chromosome
+#for fstart and fend i substract/add 2kb to actual top peak range
+plot3<-plotProfiles(fstart = 76328515, fend = 76332915, fchr = "15",
+             profs = profs2_3, ylims=list(c(0,200),c(0,200),c(0,200),c(0,200),c(0,200),c(0,200),c(0,200),c(0,200)),
+             cols = profs_colors,
+             txdb = TxDb.Mmusculus.UCSC.mm39.refGene,
+             ann=ann)
+```
+
