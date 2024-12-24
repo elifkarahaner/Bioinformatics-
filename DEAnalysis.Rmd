@@ -1,0 +1,90 @@
+---
+title: "DE Analysis"
+author: "elif"
+date: "2024-02-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##Loading libraries
+```{r}
+library(edgeR)
+library(dplyr)
+```
+
+##Reading Filtered Count Data
+```{r}
+# Set working directory
+setwd("C:/Users/elif karahaner/Desktop/rnaseq/annotate/")
+
+# Read filtered count data
+counts <- read.csv("filtered_count.tsv",
+                   stringsAsFactors = FALSE,
+                   header = TRUE,
+                   sep = "\t")
+
+```
+
+##Preparing Data for Differential Expression Analysis
+```{r}
+# Select relevant columns for analysis
+counts1 <- counts %>%
+  select("gene_id", "gene_type", "gene_name", "seqnames", "start", "end", "strand", "Untreated1", "Untreated2", "Treated1", "Treated2")
+
+# Extract gene IDs
+gene_ids <- counts1[, 1]
+
+# Define experimental conditions
+class <- factor(c(rep("Untreated", 2), rep("Treated", 2)), levels = c("Untreated", "Treated"))
+
+# Create DGEList object
+dge <- DGEList(counts = counts1[, 8:ncol(counts1)], genes = gene_ids, group = class)
+
+# Estimate dispersions
+dge <- estimateCommonDisp(dge, verbose = TRUE)
+dge <- estimateTagwiseDisp(dge)
+
+```
+
+##Performing Differential Expression Analysis
+```{r}
+# Perform exact test
+test <- exactTest(dge)
+
+# Summarize up- and down-regulated genes
+summary(up_down <- decideTestsDGE(test, p = 0.05))
+
+# Retrieve top differentially expressed genes
+degs <- topTags(n = Inf, test)
+
+# Convert results to data frame
+degs <- data.frame(degs)
+
+# Ensure gene ID columns match
+colnames(counts1)[1] <- "gene_id"
+colnames(degs)[1] <- "gene_id"
+
+```
+
+##Merging DEGs with Filtered FPKM Data
+```{r}
+# Merge DEGs with filtered FPKM data
+fpkms_filtered <- read.csv("fpkms_filtered.tsv",
+                           header = TRUE,
+                           stringsAsFactors = FALSE,
+                           sep = "\t")
+
+Ctrl_WT_filtered <- merge(degs, fpkms_filtered, by = "gene_id")
+
+# Write merged data to output file
+output_path <- "C:/Users/elif karahaner/Desktop/rnaseq/Visualization/De_Ctrl_WT_filtered.tsv"
+write.table(Ctrl_WT_filtered,
+            file = output_path, 
+            sep = "\t", 
+            row.names = FALSE)
+
+```
+
