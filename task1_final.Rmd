@@ -1,0 +1,133 @@
+---
+title: "task1_final"
+author: "elif"
+date: "2024-12-16"
+output: 
+  html_document:
+    theme: cerulean
+    toc: true
+params:
+  code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+# PCA and UMAP Using Seurat Object of One Sample
+
+## Table of Contents
+{:.no_toc}
+
+* [Load neccessary packages and call libraries](#load-necessary-packages-and-call-libraries)
+
+* [Import expression data and create seurat object](#import-expression-data-and-create-seurat-objects)
+
+* [Normalize the matrix find highly variable genes and scale the data](#normalize-the-matrix-find-highly-variable-genes-and-scale-the-data)
+
+* [PCA plot](#pca-plot)
+
+* [Cluster the cells and perform UMAP ](#cluster-the-cells-and-perform-umap)
+
+##Load neccessary packages and call libraries
+
+```{r }
+library(Seurat)
+library(ggplot2)
+```
+
+##Import expression data and create seurat object
+
+For six sample from 2 patient. One primary two lymph node samples from each patient. These samples were found in GSE180286_RAW folder, from second file to seventh file. 
+
+```{r}
+
+# Set the working directory
+setwd("/Users/elifkarahaner/Desktop/scrna/")
+
+# Get the list of files in the directory
+file_paths <- list.files("GSE180286_RAW", full.names = TRUE)[2:7]
+
+# Initialize an empty list to store Seurat objects
+seurat_objects <- list()
+seurat_objects[1]
+# Loop over each file and create a Seurat object
+for (file_path in file_paths) {
+  # Load the data
+  data <- read.table(gzfile(file_path), header = TRUE, sep = "\t")
+  
+  # Get a clean name for the Seurat object
+  file_name <- basename(file_path)
+  file_name <- sub("\\.txt\\.gz$", "", file_name)
+  
+  # Create a Seurat object
+  seurat_obj <- CreateSeuratObject(counts = data, project = file_name)
+  
+  # Store the Seurat object in the list
+  seurat_objects[[file_name]] <- seurat_obj
+}
+
+# Optionally, print out the Seurat objects
+print(seurat_objects)
+
+```
+##Normalize the matrix find highly variable genes and scale the data
+
+```{r}
+# Separate loop to normalize data for each Seurat object
+for (file_name in names(seurat_objects)) {
+  seurat_objects[[file_name]] <- NormalizeData(seurat_objects[[file_name]])
+}
+
+# Separate loop to find variable features for each Seurat object
+for (file_name in names(seurat_objects)) {
+  seurat_objects[[file_name]] <- FindVariableFeatures(seurat_objects[[file_name]])
+}
+
+# Separate loop to scale data for each Seurat object
+for (file_name in names(seurat_objects)) {
+  seurat_objects[[file_name]] <- ScaleData(seurat_objects[[file_name]])
+}
+
+```
+
+##PCA plot
+
+```{r}
+for (file_name in names(seurat_objects)) {
+  # Perform PCA
+  seurat_objects[[file_name]] <- RunPCA(seurat_objects[[file_name]])
+  
+  # Visualize PCA (using the first 2 dimensions)
+  pca_plot <- DimPlot(seurat_objects[[file_name]], reduction = "pca", dims = c(1, 2)) + 
+    ggtitle(paste(file_name, "- PCA Plot"))
+  
+  # Print the PCA plot (optional: save it as a file if needed)
+  print(pca_plot)
+}
+
+```
+##Cluster the cells and perform UMAP 
+
+```{r}
+# Separate loop to perform clustering and UMAP visualization for each Seurat object
+for (file_name in names(seurat_objects)) {
+  # Find neighbors using the first 10 PCs
+  seurat_objects[[file_name]] <- FindNeighbors(seurat_objects[[file_name]], dims = 1:10)
+  
+  # Perform clustering
+  seurat_objects[[file_name]] <- FindClusters(seurat_objects[[file_name]], resolution = 0.5)  # Adjust resolution as needed
+  
+  # Run UMAP for dimensionality reduction
+  seurat_objects[[file_name]] <- RunUMAP(seurat_objects[[file_name]], dims = 1:10)
+  
+  # Visualize the clusters on UMAP
+  umap_plot <- DimPlot(seurat_objects[[file_name]], reduction = "umap", group.by = "seurat_clusters") + 
+    ggtitle(paste(file_name, "- UMAP with Clusters"))
+  
+  # Print the UMAP plot (optional: save it as a file if needed)
+  print(umap_plot)
+}
+
+```
+
