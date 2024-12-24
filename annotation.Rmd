@@ -1,0 +1,74 @@
+---
+title: "annotation"
+author: "elif"
+date: "2024-02-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##Loading libraries
+```{r}
+library(biomaRt)      
+library(rtracklayer)  
+library(dplyr)        
+
+```
+
+##Import GTF File As Data Frame
+```{r}
+gtf_path <- "C:/Users/elif karahaner/Desktop/rnaseq/GRCh38.p14.gtf/gencode.v45.primary_assembly.annotation.gtf.gz"
+gtf <- rtracklayer::import(gtf_path)
+gtf_df <- as.data.frame(gtf)
+```
+
+##Annotate Counts Data
+```{r}
+# Specify the path to the counts file
+counts_path <- "C:/Users/elif karahaner/Desktop/rnaseq/quantify/Gencode-p14.counts.tsv"
+
+# Read gene counts data
+gene_counts <- read.csv(counts_path, sep = "\t", row.names = 1, header = TRUE)
+```
+
+```{r}
+# Match GTF data to gene counts
+gtf_matched <- gtf_df[match(row.names(gene_counts), gtf_df$gene_id), ]
+
+# Select relevant columns from GTF data
+selected_gtf <- gtf_matched[, c("gene_id", "gene_name", "gene_type", "seqnames", "start", "end", "strand")]
+
+# Merge GTF data with counts
+gene_counts_annotated <- merge(selected_gtf, gene_counts, by.x = "gene_id", by.y = "row.names")
+
+# Save the annotated counts to a file
+output_counts_path <- "C:/Users/elif karahaner/Desktop/rnaseq/annotate/Annotated_Gencode-p14.counts.tsv"
+write.table(gene_counts_annotated, output_counts_path, quote = FALSE, sep = "\t", row.names = FALSE)
+```
+
+##Annotate FPKM Data
+```{r}
+# Specify the path to the FPKM file
+fpkm_path <- "C:/Users/elif karahaner/Desktop/rnaseq/quantify/Gencode-p14-FPKM-values.tsv"
+
+# Read FPKM data
+gene_fpkm <- read.csv(fpkm_path, sep = "\t", row.names = 1, header = TRUE)
+```
+
+```{r}
+# Match GTF data to FPKM data
+gtf_matched <- gtf_df[match(row.names(gene_fpkm), gtf_df$gene_id), ]
+
+# Select relevant columns from GTF data
+selected_gtf <- gtf_matched[, c("gene_id", "gene_name", "gene_type", "seqnames", "start", "end", "strand")]
+
+# Merge GTF data with FPKM
+gene_fpkm_annotated <- merge(selected_gtf, gene_fpkm, by.x = "gene_id", by.y = "row.names")
+
+# Save the annotated FPKM data to a file
+output_fpkm_path <- "C:/Users/elif karahaner/Desktop/rnaseq/annotate/Annotated_Gencode-p14-FPKM-values.tsv"
+write.table(gene_fpkm_annotated, output_fpkm_path, quote = FALSE, sep = "\t", row.names = FALSE)
+```
+
