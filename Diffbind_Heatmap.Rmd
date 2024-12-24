@@ -1,0 +1,119 @@
+---
+title: "Differential Peak Analysis and Heatmap Visualization Across Three Groups"
+author: "elif"
+date: "2024-07-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##Loading libraries
+```{r}
+library(Rsamtools)
+library(GenomicAlignments)
+library(rtracklayer)
+library(GenomicRanges)
+library(DiffBind)
+library(DESeq2)
+library(readr)
+library(ChIPpeakAnno)
+library(TxDb.Mmusculus.UCSC.mm39.knownGene)
+library(biomaRt)
+library(ggplot2)
+library(gridExtra)
+```
+
+
+
+##Give the path of peak files for each group
+```{r}
+treatment_peaks <- c("data/peak_calls/L132727.bed", "data/peak_calls/L132725.bed", "data/peak_calls/L132729.bed", "data/peak_calls/L132731.bed")
+control_peaks <- c("data/peak_calls/L132741.bed", "data/peak_calls/L132743.bed", "data/peak_calls/L132745.bed", "data/peak_calls/L132747.bed")
+reverse_peaks <- c("data/peak_calls/L132733.bed", "data/peak_calls/L132735.bed", "data/peak_calls/L132737.bed", "data/peak_calls/L132739.bed")
+
+```
+
+
+##Read and process peak files
+```{r}
+all_peaks <- list()
+for (file in c(control_peaks, treatment_peaks, reverse_peaks)) {
+  peaks <- read_delim(file, delim = "\t", col_names = FALSE, show_col_types = FALSE)
+  colnames(peaks) <- c("chr", "start", "end", "name", "score", "strand")
+  all_peaks[[file]] <- peaks
+}
+
+# Optional: Write processed peaks to disk
+mapply(function(peaks, file) {
+  write.table(peaks, file, sep = "\t", quote = FALSE, col.names = FALSE, row.names = FALSE)
+}, all_peaks, c(control_peaks, treatment_peaks, reverse_peaks))
+
+```
+
+
+##Creating a Sample Sheet
+```{r}
+samples <- data.frame(
+  SampleID = c("cd_cd_1", "cd_cd_2", "cd_cd_3", "cd_cd_4", "hdf_hdf_1", "hdf_hdf_2", "hdf_hdf_3", "hdf_hdf_4", "hdf_cd_1", "hdf_cd_2", "hdf_cd_3", "hdf_cd_4"),
+  Condition = rep(c("control", "treatment", "reverse"), each = 4),
+  bamReads = c(
+    "data/cd_cd/L132741_sp.bam", "data/cd_cd/L132743_sp.bam", "data/cd_cd/L132745_sp.bam", "data/cd_cd/L132747_sp.bam",
+    "data/hdf_hdf/L132727_sp.bam", "data/hdf_hdf/L132725_sp.bam", "data/hdf_hdf/L132729_sp.bam", "data/hdf_hdf/L132731_sp.bam", 
+    "data/hdf_cd/L132733_sp.bam", "data/hdf_cd/L132735_sp.bam", "data/hdf_cd/L132737_sp.bam", "data/hdf_cd/L132739_sp.bam"
+  ),
+  Peaks = c(control_peaks, treatment_peaks, reverse_peaks),
+  PeakCaller = rep("bed", 12)
+)
+
+```
+
+
+##Diffbind analysis
+```{r}
+dba <- dba(sampleSheet = samples)
+dba_count <- dba.count(dba)
+dbaObj <- dba.normalize(dba_count)
+
+dba_analyze <- dba.analyze(dbaObj, method = DBA_DESEQ2)
+dba.plotHeatmap(dba_analyze)
+
+# Results for each comparison
+results_control_vs_treatment <- dba.report(dba_analyze, contrast = 1, method = DBA_DESEQ2, th = 1)
+results_control_vs_reverse <- dba.report(dba_analyze, contrast = 2, method = DBA_DESEQ2, th = 1)
+results_treatment_vs_reverse <- dba.report(dba_analyze, contrast = 3, method = DBA_DESEQ2, th = 1)
+
+```
+
+
+##Find top 10 peaks for each comparison
+```{r}
+top10_peaks_control_vs_treatment <- head(results_control_vs_treatment[order(mcols(results_control_vs_treatment)$FDR)], 10)
+top10_peaks_control_vs_reverse <- head(results_control_vs_reverse[order(mcols(results_control_vs_reverse)$FDR)], 10)
+top10_peaks_treatment_vs_reverse <- head(results_treatment_vs_reverse[order(mcols(results_treatment_vs_reverse)$FDR)], 10)
+
+# Print top peaks
+top10_peaks_control_vs_treatment
+top10_peaks_control_vs_reverse
+top10_peaks_treatment_vs_reverse
+
+```
+
+
+##Visualize correlation of top 10 peaks with heatmap
+```{r}
+# Combine top 10 peaks
+combined_top_peaks <- c(top10_peaks_control_vs_treatment, top10_peaks_control_vs_reverse, top10_peaks_treatment_vs_reverse)
+
+# Create DiffBind object for top peaks
+dba_top_peaks <- dba.peakset(dba_analyze, peaks = combined_top_peaks)
+dba.plotHeatmap(dba_top_peaks)
+
+```
+
+
+
+
+
+
