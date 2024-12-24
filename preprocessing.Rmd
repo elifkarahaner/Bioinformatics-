@@ -1,0 +1,97 @@
+---
+title: "RNA-Seq Data Annotati"
+author: "elif"
+date: "2024-02-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##Loading libraries
+```{r}
+library(dplyr)
+```
+
+##Function for Data Filtering based on tresholds
+```{r}
+filter_data <- function(x, threshold = 1, reps, percentage = 0.50) {
+  for (i in unique(reps)) {
+    idx <- which(reps == i)
+    if (sum(x[idx] >= threshold) >= length(idx) * percentage) {
+      return(TRUE)
+    }
+  }
+  return(FALSE)
+}
+
+```
+
+##Loading and Processing FPKM Data
+```{r}
+#Set working directory (adjust path as needed)
+setwd("C:/Users/elif karahaner/Desktop/rnaseq/annotate")
+
+#Load and Process FPKM Data
+fpkms <- read.csv("C:/Users/elif karahaner/Desktop/rnaseq/annotate/Annotated_Gencode-p14-FPKM-values.tsv",
+                   header = TRUE,
+                   stringsAsFactors = FALSE,
+                   sep = "\t")
+
+
+```
+
+```{r}
+# Select and rename relevant columns
+fpkms <- fpkms %>% 
+  select(gene_id, gene_type, gene_name, seqnames, start, end, strand,
+         SRR27446494.bam, SRR27446495.bam, SRR27446497.bam, SRR27446498.bam) %>% 
+  rename(Treated1 = SRR27446494.bam,
+         Treated2 = SRR27446495.bam,
+         Untreated1 = SRR27446497.bam,
+         Untreated2 = SRR27446498.bam)
+
+# Define replicates
+reps <- c(rep(1, 2), rep(2, 2))
+
+# Apply filter function
+true_indexes <- apply(fpkms[, 8:ncol(fpkms)], 1, filter_data, threshold = 1, reps = reps, percentage = 0.50)
+
+# Filter FPKM data
+filtered_fpkms <- fpkms[true_indexes, ]
+
+# Save filtered FPKM data
+write.table(filtered_fpkms, file = "C:/Users/elif karahaner/Desktop/rnaseq/annotate/fpkms_filtered.tsv",
+            sep = "\t", row.names = FALSE)
+
+```
+
+##Loading and Processing Counts Data
+```{r}
+counts <- read.csv("C:/Users/elif karahaner/Desktop/rnaseq/annotate/Annotated_Gencode-p14.counts.tsv",
+                   header = TRUE,
+                   stringsAsFactors = FALSE,
+                   sep = "\t")
+
+# Select and rename relevant columns
+counts <- counts %>% 
+  select(gene_id, gene_type, gene_name, seqnames, start, end, strand,
+         SRR27446494.bam, SRR27446495.bam, SRR27446497.bam, SRR27446498.bam) %>% 
+  rename(Treated1 = SRR27446494.bam,
+         Treated2 = SRR27446495.bam,
+         Untreated1 = SRR27446497.bam,
+         Untreated2 = SRR27446498.bam)
+
+# Extract filtered gene IDs
+fpkm_ids <- filtered_fpkms[, "gene_id", drop = FALSE]
+
+# Filter counts data
+filtered_counts <- merge(fpkm_ids, counts, by = "gene_id")
+
+# Save filtered counts data
+write.table(filtered_counts, file = "C:/Users/elif karahaner/Desktop/rnaseq/annotate/filtered_count.tsv",
+            sep = "\t", row.names = FALSE)
+
+```
+
