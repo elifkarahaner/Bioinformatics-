@@ -1,0 +1,73 @@
+---
+title: "Task#1"
+author: "elif"
+date: "2024-07-01"
+output: html_document
+---
+
+### **Reading the BAM File Data**
+
+**1.Downloading the BAM file**
+The BAM file is downloaded from **[this website](https://gigamove.rwth-aachen.de/en/download/86082ca6da261d46c6faccaf49e95e29)**
+
+**2. Installing necessary packages**
+Rsamtools, GenomicRanges, GenomicAlignments and Biocgenerics packages are installed.
+
+```{r package_calling}
+library(GenomicAlignments)
+library(GenomicRanges)
+library(Rsamtools)
+library("ggplot2")
+
+```
+
+**3.Define the file paths**
+```{r file_path_of_sortedbamfile}
+bam_file <- "data/l132737_sp.bam"
+
+```
+
+**4.Reading and Analyzing the BAM file**
+```{r read_and_analzye}
+#Reading the BAM file.
+alignments <- readGAlignmentPairs(bam_file)
+
+# Create a table with the count of reads for each chromosome
+chromosome_names <- seqnames(alignments)
+chromosome_counts <- table(chromosome_names)
+
+# Convert chromosome names to include "chr" prefix if missing
+chromosome_counts_names <- names(chromosome_counts)
+chromosome_counts_names <- paste0("chr", chromosome_counts_names)
+
+# Create a vector of desired chromosome names to keep
+desired_chromosomes <- c(paste0("chr", 1:19), "chrX", "chrY")
+
+# Filter counts for only the desired chromosomes
+chromosome_counts <- chromosome_counts[chromosome_counts_names %in% desired_chromosomes]
+
+# Convert the table to a data frame for plotting
+chromosome_counts_df <- as.data.frame(chromosome_counts, stringsAsFactors = FALSE)
+colnames(chromosome_counts_df) <- c("Chromosome", "Count")
+
+```
+
+**5.Plotting distribution of reads**
+```{r plot_distribustion}
+# Plotting the reads corresponding to chromosomes of interest
+ggplot(chromosome_counts_df, aes(x = Chromosome, y = Count)) +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  labs(title = "Distribution of Reads on Mouse Chromosomes",
+       x = "Chromosome",
+       y = "Read Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+sessionInfo()
+```
+```
+
+
+
+
+

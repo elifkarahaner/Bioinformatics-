@@ -1,0 +1,36 @@
+---
+title: "task#2"
+author: "elif"
+date: "2024-07-02"
+output: html_document
+---
+
+### **Converting the BAM file to BigWig Format**
+
+**1.Calling the packages**
+
+GenomicAlignments and rtracklayer packages are installed and called.
+
+```{r}
+library(GenomicAlignments)
+library(rtracklayer)
+```
+
+**2.Alignment and coverage of the file**
+
+```{r}
+bamfile <- "~/Desktop/task2/data/L132737_sp.bam"
+alignment <- readGAlignments(bamfile)
+reads_coverage <- coverage(alignment)
+
+```
+
+**3.Converting the BAM file to BigWig format**
+
+```{r}
+output_bw <- "~/Desktop/task2/data/output_BigWig.bw"
+export.bw(reads_coverage, con= output_bw)
+
+sessionInfo()
+```
+

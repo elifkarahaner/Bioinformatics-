@@ -1,0 +1,251 @@
+---
+title: "task#3"
+author: "elif"
+date: "2024-07-02"
+output: html_document
+---
+
+### **Finding the Highest Peak That Has More Read Underneath by Using Bed File**
+
+**1.Loading packages**
+
+```{r}
+library(GenomicRanges)
+library(Rsamtools)
+library(rtracklayer)
+library(GenomicAlignments)
+library(dplyr)
+library(ggplot2)
+```
+
+**2.Handling alignments of BAM Files and peaks of BED Files**
+
+```{r}
+# Load BED file with peaks
+bed_file <- "data/L132737.bed"
+peaks <- import(bed_file, format = "BED")
+
+# Load BAM file with reads
+bam_file <- "data/L132737_sp.bam"
+reads <- readGAlignments(bam_file)
+reads_gr <- as(reads, "GRanges")
+
+```
+
+**3.Counting reads underneath the peaks**
+
+```{r}
+# Count overlaps of reads on peaks
+overlap_counts <- countOverlaps(peaks, reads_gr)
+peaks$read_counts <- overlap_counts
+
+```
+
+**4.Finding peaks that has more reads**
+
+```{r}
+# Identify the peak with the maximum number of reads
+peak_with_most_reads <- peaks[which.max(peaks$read_counts)]
+
+# Output the peak with the most reads
+print(peak_with_most_reads)
+
+```
+
+**5.Visualize the Highest Peak**
+
+```{r}
+# Calculate coverage over the genome
+coverage_data <- coverage(reads)
+
+# Extract coverage for the specific range of the peak with the most reads
+peak_most_seqname <- as.character(seqnames(peak_with_most_reads))
+peak_most_start <- start(peak_with_most_reads)
+peak_most_end <- end(peak_with_most_reads)
+
+# Ensure coverage_data is indexed correctly and extracted
+peak_most_coverage <- coverage_data[[peak_most_seqname]][peak_most_start:(peak_most_end + 1)]
+print(peak_most_coverage)
+
+
+# Create a data frame for plotting
+coverage_df <- data.frame(
+  position = peak_most_start:(peak_most_end + 1),
+  coverage_most= peak_most_coverage
+)
+
+
+# Plot the highest peak using ggplot2
+plot_most <- ggplot(coverage_df, aes(x = position, y = coverage_most)) +
+  geom_smooth(method="auto", se=TRUE, fullrange=FALSE, level=0.95) + ylim(0,5000)+
+  labs(title = "Coverage Plot for the Peak with Most Reads",
+       x = "Genomic Position",
+       y = "Coverage") +
+  theme_minimal()
+print(plot_most)
+
+
+# Define the range around the peak to extend the plot
+extended_start <- peak_most_start - 500
+extended_end <- peak_most_end + 500
+extended_start <- max(1, extended_start)
+
+ #Extract coverage data for the extended range
+extended_coverage <- coverage_data[[peak_most_seqname]][extended_start:extended_end]
+
+# Create a data frame of expanded area for plotting
+coverage_df <- data.frame(
+  position = extended_start:extended_end,
+  coverage_most = as.numeric(extended_coverage)
+)
+
+# Plot the coverage values within the extended range(noncolored)
+plot_near_peak <- ggplot(coverage_df, aes(x = position, y = coverage_most)) + 
+  geom_smooth(method = "auto", se = TRUE, fullrange = FALSE, level = 0.95)  +
+  ylim(0, 5000) +
+  xlim(extended_start, extended_end) +
+  labs(title = "Highest Peak",
+       x = "Genomic Position",
+       y = "Coverage") +
+  theme_minimal()
+
+print(plot_near_peak)
+
+#colored plot
+plot_near_peak1 <- ggplot(coverage_df, aes(x = position, y = coverage_most)) +
+  stat_smooth(geom = "area", fill = "lightblue", alpha = 0.5) +
+  ylim(0, 5000) +
+  xlim(extended_start, extended_end) +
+  labs(title = "Highest Peak",
+       x = "Genomic Position",
+       y = "Coverage") +
+  theme_minimal()
+
+print(plot_near_peak1)
+
+#log
+plot_near_peak2 <- ggplot(coverage_df, aes(x = position, y = coverage_most)) +
+  stat_smooth(geom = "area", fill = "lightblue", alpha = 0.5) +
+  scale_y_continuous(trans = "log10", limits = c(1, 50000)) +
+  xlim(extended_start, extended_end) +
+  labs(title = "Coverage Peaks",
+       x = "Genomic Position",
+       y = "Log10(Coverage)") +
+  theme_minimal()
+
+
+
+
+print(plot_near_peak2)
+
+
+```
+**6.Finding Smallest Peak**
+
+```{r}
+# Identify the peak with the maximum number of reads
+peak_with_least_reads <- peaks[which.min(peaks$read_counts)]
+
+# Output the peak with the most reads
+print(peak_with_least_reads)
+```
+
+**7.Plotting the Smallest Peak**
+
+```{r}
+library(ggbio)
+# We have already calculated coverage_data from your reads as mentioned above.It is for whole genome.(part number 5)
+
+# Extract coverage for the specific range of the peak with the least reads
+peak_least_seqname <- as.character(seqnames(peak_with_least_reads))
+peak_least_start <- start(peak_with_least_reads)
+peak_least_end <- end(peak_with_least_reads)
+
+
+# Ensure coverage_data is indexed correctly and extracted
+peak_least_coverage <- coverage_data[[peak_least_seqname]][peak_least_start:(peak_least_end + 1)]
+
+# Create a data frame for plotting
+coverage_df_least <- data.frame(
+  position = peak_least_start:(peak_least_end + 1),
+  coverage_least = peak_least_coverage
+)
+
+# Plot the smallest peak using ggplot2
+plot_least <- ggplot(coverage_df_least, aes(x = position, y = coverage_least)) +
+  geom_smooth(method="auto", se=TRUE, fullrange=FALSE, level=0.95) + ylim(0,5000)+
+  labs(title = "Coverage Plot for the Peak with Most Reads",
+       x = "Genomic Position",
+       y = "Coverage") +
+  theme_minimal()
+print(plot_least)
+
+# Define the range around the peak
+expanded_start <- peak_least_start - 500
+expanded_end <- peak_least_end + 500
+expanded_start <- max(1, expanded_start)
+
+ #Extract coverage data for the extended range
+expanded_coverage <- coverage_data[[peak_least_seqname]][expanded_start:expanded_end]
+
+# Create a data frame of expanded area for plotting
+coverage_df2 <- data.frame(
+  position = expanded_start:expanded_end,
+  coverage_least = as.numeric(expanded_coverage)
+)
+
+# Plot the coverage values within the extended range
+plot_near_peak3 <- ggplot(coverage_df2, aes(x = position, y = coverage_least)) +
+  geom_smooth(method = "auto", se = TRUE, fullrange = FALSE, level = 0.95) + geom_area(fill = "lightblue", alpha = 0.5)+
+  ylim(0,5000) +
+  xlim(expanded_start, expanded_end) +
+  labs(title = "Smallest Peak",
+       x = "Genomic Position",
+       y = "Coverage") +
+  theme_minimal()
+
+print(plot_near_peak3)
+
+#colored plot
+
+plot_near_peak4 <- ggplot(coverage_df2, aes(x = position, y = coverage_least)) +
+  stat_smooth(geom = "area", fill = "lightblue", alpha = 0.5) +
+  ylim(0, 500) +
+  xlim(expanded_start, expanded_end) +
+  labs(title = "Smallest Peak",
+       x = "Genomic Position",
+       y = "Coverage") +
+  theme_minimal()
+
+print(plot_near_peak4)
+
+# Plot the coverage values within the expanded range and log values
+plot_near_peak5 <- ggplot(coverage_df2, aes(x = position, y = coverage_least)) +
+  stat_smooth(geom = "area", fill = "orange", alpha = 0.5) +
+  scale_y_continuous(trans = "log10", limits = c(1, 50000)) +
+  xlim(expanded_start, expanded_end) +
+  labs(title = "Coverage Peaks",
+       x = "Genomic Position",
+       y = "Log10(Coverage)") +
+  theme_minimal()
+print(plot_near_peak5)
+```
+
+
+**8.Visualization of Plots Side-by-Side**
+```{r}
+library(grid)
+
+# Load required library
+library(gridExtra)
+
+# Arrange plots side by side using grid.arrange
+grid.arrange(plot_near_peak2, plot_near_peak5, ncol = 2)
+
+```
+
+
+
+
+
+
