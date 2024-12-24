@@ -1,0 +1,290 @@
+---
+title: "Normalization"
+author: "elif"
+date: "2024-08-06"
+output: 
+  html_document:
+    theme: cerulean
+    toc: true
+params:
+  code_folding: show  # Default setting; user can change this to false to hide code
+---
+
+```{r  setup, include=FALSE, code_folding=show}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE,code_folding = "show" ,collapse = TRUE)
+
+```
+
+# ## Subsampling for visualization of samples in same scale 
+
+## Table of Contents
+{:.no_toc}
+* [Loading required packages](#loading-required-packages)
+
+* [Giving the path of bam files and determining the groups of samples](#giving-the-path-of-bam-files-and-determining-the-groups-of-samples)
+
+* [Alignment and counting of the reads for all samples](#alignment-and-counting-of-the-reads-for-all-samples)
+
+* [Calculate and display result of counting the reads of all groups](#calculate-and-display-result-of-counting-the-reads-of-all-groups)
+
+* [Subsampling the reads of samples by using minimum reads count](#subsampling-the-reads-of-samples-by-using-minimum-reads-count)
+
+* [Comparison of control and treatment group ](#comparison-of-control-and-treatment-group)
+
+* [Comparison of control and reverse group ](#comparison-of-control-and-reverse-group)
+
+* [Comparison of reverse and treatment group ](#comparison-of-reverse-and-treatment-group)
+
+
+
+## Loading required packages
+
+```{r}
+library(Rsamtools)
+library(GenomicAlignments)
+library(GenomicRanges)
+library(DiffBind)
+library(DESeq2)
+library(readr)
+library(tsTools)
+require(TxDb.Mmusculus.UCSC.mm39.refGene)
+library(RColorBrewer)
+library(GEOquery)
+library(rtracklayer)
+library(IRanges)
+library(ggplot2)
+library(ChIPseeker)
+library(org.Mm.eg.db)
+library(GenomeInfoDb)
+library(SummarizedExperiment)
+library(S4Vectors) 
+```
+
+
+## Giving the path of bam files and determining the groups of samples
+
+```{r}
+
+# Define directories and selected samples for the different groups
+bam_dirs <- c("data/hdf_hdf", "data/hdf_cd", "data/cd_cd")
+
+selected_samples_hdf_hdf <- c("L132725_sp.bam", "L132727_sp.bam", "L132729_sp.bam", "L132731_sp.bam")
+selected_samples_hdf_cd <- c("L132733_sp.bam", "L132735_sp.bam", "L132737_sp.bam", "L132739_sp.bam")
+selected_samples_cd_cd <- c("L132741_sp.bam", "L132743_sp.bam", "L132745_sp.bam", "L132747_sp.bam")
+
+
+
+```
+
+
+
+## Alignment and counting of the reads for all samples
+
+```{r}
+# This function is to read a single BAM file, aligned reads and count them.
+compute_and_count_reads <- function(bam_file) {
+  reads <- readGAlignments(bam_file)
+  seqlevelsStyle(reads) <- "Ensembl"
+  total_reads <- length(reads)
+  return(list(reads = reads, total_reads = total_reads))
+}
+
+# To takes a list of directories and samples, iterates over them, and applies the compute_and_count_reads function to each relevant BAM file.
+compute_read_counts <- function(bam_dirs, selected_samples_list) {
+  read_counts <- list()
+  group_names <- c("hdf_hdf", "hdf_cd", "cd_cd")
+  for (i in seq_along(bam_dirs)) {
+    bam_dir <- bam_dirs[i]
+    group_name <- group_names[i]
+    selected_samples <- selected_samples_list[[i]]
+    bam_files <- list.files(bam_dir, pattern = "\\_sp.bam$", full.names = TRUE)
+    selected_bam_files <- bam_files[basename(bam_files) %in% selected_samples]
+    
+    group_read_counts <- sapply(selected_bam_files, function(bam_file) {
+      result <- compute_and_count_reads(bam_file)
+      return(result$total_reads)
+      sample_name <- basename(bam_file)
+      print(paste("Library size for sample", sample_name, "in group", group_name, ":", total_reads, "reads"))
+      return(total_reads)
+    })
+    
+    read_counts[[group_name]] <- group_read_counts
+  }
+  return(read_counts)
+}
+
+
+```
+
+
+## Calculate and display result of counting the reads of all groups
+
+```{r}
+# To get read counts for all the groups
+read_counts <- compute_read_counts(bam_dirs, list(selected_samples_hdf_hdf, selected_samples_hdf_cd, selected_samples_cd_cd))
+
+# Find the smallest number of reads across all samples
+min_reads <- min(unlist(read_counts))
+
+print(paste("Minimum reads for subsampling:", min_reads))
+```
+
+
+## Subsampling the reads of samples by using minimum reads count
+
+
+```{r}
+# Function to take reads and return subsample of them
+subsample_reads <- function(reads, num_reads) {
+  if (length(reads) > num_reads) {
+    set.seed(123)  # For reproducibility
+    sampled_reads <- sample(reads, num_reads)
+  } else {
+    sampled_reads <- reads
+  }
+  return(sampled_reads)
+}
+
+
+#Selected samples are determined to prevent error that is taken from compute_subsampled_coverage function
+selected_samples_list <- list(
+  hdf_hdf = selected_samples_hdf_hdf,
+  hdf_cd = selected_samples_hdf_cd,
+  cd_cd = selected_samples_cd_cd
+)
+
+
+#Function to subsample the reads and then calculates the coverage on the subsampled reads
+compute_subsampled_coverage <- function(bam_dirs, selected_samples_list, num_reads) {
+  
+  # Initialize coverage_list with the correct group names
+  coverage_list <- as.list(rep(NA, length(selected_samples_list)))
+  if (!is.null(names(selected_samples_list))) {
+    names(coverage_list) <- names(selected_samples_list)
+  } else {
+    names(coverage_list) <- paste0("group_", seq_along(selected_samples_list))
+  }
+  
+  for (i in seq_along(bam_dirs)) {
+    bam_dir <- bam_dirs[i]
+    group_name <- names(coverage_list)[i]
+    selected_samples <- selected_samples_list[[i]]
+    bam_files <- list.files(bam_dir, pattern = "\\_sp.bam$", full.names = TRUE)
+    selected_bam_files <- bam_files[basename(bam_files) %in% selected_samples]
+    
+    group_coverage_list <- lapply(selected_bam_files, function(bam_file) {
+      result <- compute_and_count_reads(bam_file)
+      subsampled_reads <- subsample_reads(result$reads, num_reads)
+      gr_subsampled <- granges(subsampled_reads)
+      coverage <- coverage(gr_subsampled)
+      return(coverage)
+    })
+    
+    names(group_coverage_list) <- basename(selected_bam_files)
+    
+    # Assign group_coverage_list to coverage_list[[group_name]]
+    coverage_list[[group_name]] <- group_coverage_list
+  }
+  return(coverage_list)
+}
+
+#Computing coverage by using subsampled reads with compute_subsampled_coverage function for all selected samples
+coverage_list_subsampled <- compute_subsampled_coverage(bam_dirs, selected_samples_list, min_reads)
+```
+
+
+## Comparison of control and treatment group
+
+
+```{r}
+# Extract the coverage profiles for hdf_hdf and cd_cd samples
+hdf_hdf_profs <- coverage_list_subsampled[["hdf_hdf"]]
+cd_cd_profs <- coverage_list_subsampled[["cd_cd"]]
+
+# Create a list of coverage profiles to plot
+profs_to_plot <- c(hdf_hdf_profs, cd_cd_profs)
+
+# Create a vector of colors: hdf_hdf samples one color, cd_cd samples another color
+colors <- brewer.pal(2, "Set1")
+profs_colors <- c(rep(colors[1], length(hdf_hdf_profs)), rep(colors[2], length(cd_cd_profs)))
+
+#To indicate actual place of top peak
+ann <- list(
+  "sample" = data.frame(chr = "6", start = 5510146, end = 5510546, col=c("green")))
+
+# Set the seqlevelsStyle to Ensembl
+seqlevelsStyle(TxDb.Mmusculus.UCSC.mm39.refGene) <- "ensembl"
+
+# Plot the coverage profiles
+plot <- plotProfiles(fstart = 5508146, fend = 5517546, fchr = "6",
+                      profs = profs_to_plot, 
+                      ylims = rep(list(c(0, 200)), length(profs_to_plot)),
+                      cols = profs_colors, 
+                      txdb = TxDb.Mmusculus.UCSC.mm39.refGene,
+                      ann = ann)
+
+```
+
+
+## Comparison of control and reverse group
+
+
+```{r}
+# Extract the coverage profiles for hdf_hdf and cd_cd samples
+hdf_cd_profs <- coverage_list_subsampled[["hdf_cd"]]
+cd_cd_profs <- coverage_list_subsampled[["cd_cd"]]
+
+# Create a list of coverage profiles to plot
+profs_to_plot <- c(hdf_cd_profs, cd_cd_profs)
+
+# Create a vector of colors: hdf_hdf samples one color, cd_cd samples another color
+colors <- brewer.pal(2, "Set1")
+profs_colors <- c(rep(colors[1], length(hdf_cd_profs)), rep(colors[2], length(cd_cd_profs)))
+
+#To indicate actual place of top peak
+ann <- list(
+  "sample4" = data.frame(chr = "15", start = 76330515, end = 76330915, col=c("green")))
+
+# Set the seqlevelsStyle to Ensembl
+seqlevelsStyle(TxDb.Mmusculus.UCSC.mm39.refGene) <- "ensembl"
+
+# Plot the coverage profiles
+plot <- plotProfiles(fstart = 76328515, fend = 76332915, fchr = "15",
+                      profs = profs_to_plot, 
+                      ylims = rep(list(c(0, 200)), length(profs_to_plot)),
+                      cols = profs_colors, 
+                      txdb = TxDb.Mmusculus.UCSC.mm39.refGene,
+                      ann = ann)
+```
+
+
+## Comparison of reverse and treatment group
+
+
+```{r}
+# Extract the coverage profiles for hdf_hdf and cd_cd samples
+hdf_cd_profs <- coverage_list_subsampled[["hdf_cd"]]
+hdf_hdf_profs <- coverage_list_subsampled[["hdf_hdf"]]
+
+# Create a list of coverage profiles to plot
+profs_to_plot <- c(hdf_cd_profs, hdf_hdf_profs)
+
+# Create a vector of colors: hdf_hdf samples one color, cd_cd samples another color
+colors <- brewer.pal(2, "Set1")
+profs_colors <- c(rep(colors[1], length(hdf_cd_profs)), rep(colors[2], length(hdf_hdf_profs)))
+
+ann <- list(
+  "sample4" = data.frame(chr = "13", start = 22219161, end = 22219561, col=c("green")))
+
+# Set the seqlevelsStyle to Ensembl
+seqlevelsStyle(TxDb.Mmusculus.UCSC.mm39.refGene) <- "ensembl"
+
+# Plot the coverage profiles
+plot <- plotProfiles(fstart = 22217161, fend = 22221561, fchr = "13",
+                      profs = profs_to_plot, 
+                      ylims = rep(list(c(0, 200)), length(profs_to_plot)),
+                      cols = profs_colors, 
+                      txdb = TxDb.Mmusculus.UCSC.mm39.refGene,
+                      ann = ann)
+```
+
