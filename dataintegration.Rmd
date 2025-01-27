@@ -1,0 +1,377 @@
+---
+title: "Data Integration"
+author: "elif"
+date: "2025-01-25"
+output: 
+  html_document:
+    theme: cerulean
+    toc: true
+params:
+  code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+# **DATA INTEGRATION**
+
+## Table of Contents
+{:.no_toc}
+
+* [Downloading neccessary libraries](#downloading-necessary-libraries)
+
+* [Create count matrix and seurat object for each sample and save in rds format ](#create-count-matrix-and-seurat-object-for-each-sample-and-save-in-rds-format)
+
+* [Creating one seurat object includes matrices of all samples ](#creating-one-seurat-object-includes-matrices-of-all-samples)
+
+* [Performing analysis without integration](#performing-analysis-without-integration)
+
+* [Performing integration](#performing-integration)
+
+* [Join Layers and classify cell clusters](#join-layers-and-classify-cell-cluısters)
+
+* [Harmony reduciton vs pca reduction](#harmony-reduction-vs-pca-reduction)
+
+## **Downloading neccessary libraries**
+
+```{r warning=FALSE,message=FALSE}
+library(GEOquery)    # to get data from GEO database
+library(Seurat)      
+library(BPCells)     # to handle large data sets
+library(dplyr)       
+library(ggplot2)     
+library(ggrepel)     
+library(patchwork)   
+library(Matrix)
+library(SeuratData)  
+library(hdf5r)
+library(SeuratDisk)  # to write data to disk
+library(CIPR)
+
+# Increase memory limit (for large data sets)
+options(future.globals.maxSize = 3e+09)
+```
+
+
+## **Create count matrix and seurat object for each sample and save in rds format**
+
+To handle memory issue while creating one seurat object from counts_list, instead of hdf5 format, seurat objects were saved in rds format.
+
+```{r}
+# Geo accession number of data sets
+geo_accession <- "GSE197268"
+
+# Downloading metadata
+gse <- getGEO(geo_accession, GSEMatrix = TRUE)
+metadata <- pData(phenoData(gse[[1]]))
+
+# Create empty list to add seurat object of each sample
+seurat_objects <- list()
+
+for (i in 1:nrow(metadata)) {
+    cat("Processed row:", i, "\n")  
+    
+    sample_id <- metadata$geo_accession[i]
+    title <- metadata$title[i]
+
+    # Path of files used to create count matrix
+    sample_dir <- file.path(getwd(), sample_id, title)
+    barcodes_file <- file.path(sample_dir, "barcodes.tsv.gz")
+    features_file <- file.path(sample_dir, "features.tsv.gz")
+    matrix_file <- file.path(sample_dir, "matrix.mtx.gz")
+
+    # Load the data to the seurat 
+    counts <- ReadMtx(mtx = matrix_file, features = features_file, cells = barcodes_file)
+
+    # Take information specific to each sample from metadata
+    sample_metadata <- data.frame(
+        orig.ident = sample_id,
+        title = title,
+        stringsAsFactors = FALSE
+    )
+    
+    # Create seurat object using count matrix and metadata
+    seurat_obj <- CreateSeuratObject(counts = counts, project = sample_id, meta.data = sample_metadata)
+    
+    # Function to create layer in seurat object
+    assay_v3 <- CreateAssayObject(
+      counts = seurat_obj[["RNA"]]$counts,
+      # data line is optional
+      # data = seurat_obj[["RNA"]]$data
+    )
+    
+    # Adding layer to RNA assay of object
+    seurat_obj[["RNA"]] <- assay_v3
+    
+    # Save the each seurat object to the disk
+    save_filename <- paste0("seurat_object_", sample_id, ".rds")
+    saveRDS(seurat_obj, save_filename)
+
+    # Add the seurat object to the list
+    seurat_objects[[sample_id]] <- save_filename
+}
+
+
+```
+
+## **Creating one seurat object includes matrices of all samples**
+
+Seurat objects that are saved in rds format used to take count matrix information from it. Then each matrix is added to counts_list and list was used to create seurat object.
+
+```{r, eval=FALSE}
+counts_list <- list()
+
+for (i in 1:nrow(metadata)) {
+    cat("Processed row:", i, "\n")  
+  
+    # Get the sample ID from the current row of the metadata
+    sample_id <- metadata$geo_accession[i]
+    
+    # Read the Seurat object for the current sample
+    obj <- readRDS(seurat_objects[[sample_id]])
+    
+    # Set the output directory for storing count matrices for the sample
+    output_dir <- file.path("/Users/elifkarahaner/counts", sample_id)
+    
+    # Write the count matrix for the current sample to the output directory
+    write_matrix_dir(mat = obj[["RNA"]]$counts, dir = output_dir)
+    
+    # Open the saved matrix from the output directory and load it into R
+    counts.mat <- open_matrix_dir(dir = output_dir)
+    
+    # Store the loaded count matrix in the counts_list at the current index
+    counts_list[[sample_id]] <- counts.mat
+}
+
+```
+
+
+```{r}
+
+counts_list <- list()
+
+for (i in 1:nrow(metadata)) {
+    cat("Processed row:", i, "\n")  
+  
+    # Get the sample ID from the current row of the metadata
+    sample_id <- metadata$geo_accession[i]
+    output_dir <- file.path("/Users/elifkarahaner/counts", sample_id)
+    # Open the saved matrix from the output directory and load it into R
+    counts.mat <- open_matrix_dir(dir = output_dir)
+    
+    # Store the loaded count matrix in the counts_list at the current index
+    counts_list[[sample_id]] <- counts.mat
+}
+
+
+#seuro<-CreateSeuratObject(counts_list)
+
+seuro<-CreateSeuratObject(counts_list,meta.data = metadata)
+
+#i had wrong information in the part of orig.ident of metadata found in seurat object, that is why i added the geo_accession number which is found metadata  to metadata of seurat object
+seuro$orig.ident <- metadata$geo_accession
+
+
+
+```
+
+## **Performing analysis without integration**
+
+```{r}
+#while my samples are found in same seurat in different layers, i dont need to run split function. If i have different seurat objects and if i merge them, after that i would have to split them to different layers. But i gave count list to create seurat object so they are already in different layers.
+table(seuro$orig.ident)
+seuro1 <- NormalizeData(seuro)
+seuro1 <- FindVariableFeatures(seuro1)
+seuro1 <- ScaleData(seuro1)
+seuro1 <- RunPCA(seuro1)
+seuro1 <- FindNeighbors(seuro1)
+seuro1 <- FindClusters(seuro1, resolution = 0.8, cluster.name = "unintegrated_clusters") #try with resolution 0.01
+seuro1 <- RunUMAP(seuro1, dims = 1:30, reduction = "pca", reduction.name = "umap.unintegrated")  
+
+#while i realised after normalization, i added orig.it to normalized seurat object which is seuro1
+seuro1$orig.ident <- metadata$geo_accession
+#now it gives sample id's(geo_accession numbers) and number of cells related(coming from) to these samples.
+head(seuro1@meta.data)
+
+# Visualize the UMAP
+#Use that to plot clusters by umap.This one is the same plot as used in article.
+p <- DimPlot(seuro1,reduction="umap.unintegrated",label = TRUE)
+p
+
+
+p1 <- DimPlot(seuro1, reduction = "umap.unintegrated",group.by="orig.ident") +ggtitle("unintagrated")
+#p1
+
+```
+
+## **Performing integration**
+
+```{r}
+seuro_integrated <- IntegrateLayers(object = seuro1, method = HarmonyIntegration, orig.reduction = "pca", new.reduction = "harmony",verbose = TRUE)
+
+# re-join layers after integration
+#seuro_integrated[["RNA"]] <- JoinLayers(seuro_integrated[["RNA"]])
+
+seuro_integrated <- FindNeighbors(seuro_integrated, reduction = "harmony", dims = 1:30)
+seuro_integrated <- FindClusters(seuro_integrated, resolution = 0.8, cluster.name="harmonyCluster")
+
+table(seuro_integrated@meta.data[["harmonyCluster"]])
+
+# UMAP visualization corresponding to each sample geo_accession,after integration we should see clusters are mixed to each other very well,same cell types mixed very well from different samples
+seuro_integrated <- RunUMAP(seuro_integrated,reduction="harmony",dims=1:30,reduction.name="harmonyUmap")
+p2<-DimPlot(seuro_integrated,reduction="harmonyUmap",group.by = "orig.ident")
+#p2
+
+p1+p2
+
+seuro_integrated$method <- metadata$`treatment:ch1`
+head(seuro_integrated@meta.data)
+
+p3 <- DimPlot(seuro_integrated,reduction="harmonyUmap",group.by = "method")
+#p3
+
+# Use that to plot clusters by umap.
+p4 <- DimPlot(seuro_integrated,reduction="harmonyUmap",label = TRUE)
+#p4
+
+# To add new info to metadata in seurat object from metadata i have (downloaded fromg geo)
+seuro_integrated$respond <- metadata$characteristics_ch1.1
+head(seuro_integrated@meta.data)
+
+```
+
+
+## **Join Layers and classify cell clusters**
+
+The CIPR (Cluster Identity Prediction by Reference) package is used to infer cell types for single-cell RNA-seq data by comparing marker genes of clusters with known reference dataset.
+
+```{r}
+#To join layers after the integration, as an output seurat object will have 3 layers (count,data,scale.data) instead of 219 layers(each sample has their own count and data).
+seuro_integrated[["RNA"]] <- JoinLayers(seuro_integrated[["RNA"]])
+
+#While i have pca result for seuro object which i have done before integration, i dont need to do pca again, just those below lines are neccessary.
+seuro_integrated <- FindNeighbors(seuro_integrated, reduction = "harmony", dims = 1:30)
+seuro_integrated <- FindClusters(seuro_integrated, resolution = 1)
+seuro_integrated <- RunUMAP(seuro_integrated, dims = 1:30, reduction = "harmony",reduction.name = "umapp")
+#to show clusters before annotation 
+p5 <- DimPlot(seuro_integrated,reduction = "umapp",label = TRUE)
+p5
+
+#log treshold is 0.1 instead of 0.25 in this version 5
+#markers <- FindMarkers(seuro_integrated, ident.1 = 0, min.pct=0.5,only.pos=TRUE,logfc.treshold=0.1)
+#this gives differently expressed genes which expressed in cell cluster zero and less express in other clusters. You can decide looking at their log2fc and pt values below.
+#head(markers)
+
+#Visualization of gene expression on plot
+#FeaturePlot(seuro_integrated,features=c("LYZ","S100A9","FCN1"))
+
+#Find markers which are differently expressed genes in one cluster among others. Findmarkers do this for specific cluster but findallmarker do this for all clusters. It find differently expressed marker genes for each cluster.Findallmarkers finds the markers in a cluster compared to all other clusters(find markers for every cluster compared to all remaining cells, report only the positive)
+allmarkers<- FindAllMarkers(seuro_integrated)
+
+#avgexp <- AverageExpression(seuro_integrated)
+
+# Plot summarizing top scoring references per cluster (logFC comparison),top plots variable is created after that code
+CIPR(input_dat = allmarkers,
+     comp_method = "logfc_dot_product", 
+     reference = "immgen", 
+     plot_ind = F,
+     plot_top = T)
+     
+
+# Plots for individual clusters,instead of summarizing the info, it gives detailed information for each cluster cell type classification
+CIPR(input_dat = allmarkers,
+     comp_method = "logfc_dot_product", 
+     reference = "immgen", 
+     plot_ind = T,
+     plot_top = F)
+
+
+
+head(top_plots)
+str(top_plots) # To understand its structure
+
+cluster_data <- top_plots$data
+head(cluster_data)
+
+
+
+# Select the cell type with the highest  z-score for each cluster
+best_cell_type <- cluster_data %>%
+    group_by(cluster) %>%
+    slice(which.max(z_score)) %>%
+    select(cluster, reference_cell_type, z_score)
+
+print(best_cell_type)
+
+#Adding cell type info to metadata of seuro_integrated object
+#seuro_integrated$cell_type <- best_cell_type$reference_cell_type
+#head(seuro_integrated@meta.data)
+#This shows each cell with cell type annotation instead of clusters 
+#DimPlot(seuro_integrated, group.by = "cell_type", label = TRUE) +
+    #labs(title = "UMAP Projection with Cell Type Annotations")
+
+# Extract the reference_cell_type column into a list
+cell_type_list <- as.list(best_cell_type$reference_cell_type)
+
+# Print the list
+print(cell_type_list)
+
+names(cell_type_list) <- levels(seuro_integrated)
+seuro_integrated <- RenameIdents(seuro_integrated, cell_type_list)
+seuro_integrated <- RunUMAP(seuro_integrated, dims = 1:30, reduction = "harmony",reduction.name = "umapp")
+p6 <-DimPlot(seuro_integrated, label = TRUE, reduction = "umapp", pt.size = 0.5) + labs(title = "UMAP Projection with Cell Type Annotations")
+
+
+#to show two plots side by side,one shows cell clusters other one shows cell clusters with cell type annotations
+p5 + p6
+
+
+```
+
+
+## **Harmony reduction vs pca reduction** 
+
+Reduction paramater is set as harmony in one graph and as pca in other one when running RunUMAP fucntion to compare two results.
+
+```{r}
+#setting reduction paramater as pca instead of harmony
+seuro_integrated <- RunUMAP(seuro_integrated, dims = 1:30, reduction = "pca",reduction.name = "pca_final")
+#to show clusters before annotation 
+p7 <- DimPlot(seuro_integrated,reduction = "pca_final",label = TRUE)
+
+#first plot is obtained setting reduction parameter as harmony, other one is obtained setting reduction parameter as pca like in article.
+p6 + p7
+
+```
+
+
+
+## **Backup way if there would be any problem by renaming idents**
+
+```{r,eval=FALSE}
+# Step 1: Check current identities
+current_identities <- Idents(seuro_integrated)
+print(unique(current_identities))
+
+# Step 2: Reset identities to original clusters
+seuro_integrated <- SetIdent(seuro_integrated, value = seuro_integrated$seurat_clusters)
+
+# Step 3: Verify new identities
+current_identities <- Idents(seuro_integrated)
+print(unique(current_identities))
+
+# Step 4: Create a named vector for mapping cell types to clusters
+# Ensure best_cell_type has 'cluster' and 'reference_cell_type' columns
+cell_type_vector <- setNames(best_cell_type$reference_cell_type, best_cell_type$cluster)
+
+# Step 5: Rename the identities in the Seurat object
+seuro_integrated <- RenameIdents(seuro_integrated, cell_type_vector)
+
+#p6 <- DimPlot(seuro_integrated, reduction = "umapp", label = TRUE, pt.size = 0.5) + NoLegend()
+
+#p5 + p6
+
+
+```
+
